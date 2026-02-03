@@ -1,5 +1,7 @@
 # ShaderLab
 
+A shader lab for mirage-engine.
+
 ## Quick Start
 
 ```bash
