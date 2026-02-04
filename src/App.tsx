@@ -1,4 +1,5 @@
 import { useState } from "react";
+
 import { Canvas } from "@react-three/fiber";
 import Editor from "react-simple-code-editor";
 import { highlight, languages } from "prismjs";
@@ -8,8 +9,9 @@ import "prismjs/themes/prism-dark.css"; // 다크 테마
 
 import { Preview } from "./components/Preview";
 import { defaultFragment, defaultVertex } from "./shaders/defaultCode";
+const [fragCode, setFragCode] = useState(defaultFragment);
 
-// 간단한 스타일링
+
 const styles = {
   container: {
     display: "flex",
