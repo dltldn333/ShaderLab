@@ -11,6 +11,23 @@ interface Props {
   onToggle: (e: React.MouseEvent) => void;
 }
 
+const LockIcon = () => (
+  <svg
+    width="12"
+    height="12"
+    viewBox="0 0 24 24"
+    fill="none"
+    stroke="currentColor"
+    strokeWidth="2.5"
+    strokeLinecap="round"
+    strokeLinejoin="round"
+    style={{ opacity: 0.6 }}
+  >
+    <rect x="3" y="11" width="18" height="11" rx="2" ry="2" />
+    <path d="M7 11V7a5 5 0 0 1 10 0v4" />
+  </svg>
+);
+
 export function SortableBlock({
   id,
   name,
@@ -26,42 +43,103 @@ export function SortableBlock({
   const style = {
     transform: CSS.Transform.toString(transform),
     transition,
-    padding: "12px",
+    padding: "10px 12px",
     marginBottom: "4px",
-    backgroundColor: isActive ? "#2d2d2d" : "#1e1e1e",
-    borderLeft: isActive ? "4px solid #3b82f6" : "4px solid transparent",
+    backgroundColor: isLocked ? "#1a1a1b" : isActive ? "#2d2d2d" : "#1e1e1e",
+    borderLeft: isActive ? "3px solid #3b82f6" : "3px solid transparent",
+    borderRadius: "6px",
     cursor: isLocked ? "default" : "pointer",
     display: "flex",
     alignItems: "center",
     justifyContent: "space-between",
-    color: isEnabled ? "#d4d4d4" : "#666", // 꺼진 건 흐리게
-    opacity: isLocked ? 0.8 : 1,
+    color: isEnabled ? (isLocked ? "#888" : "#d4d4d4") : "#555",
+    border: isLocked ? "1px dashed #333" : "1px solid transparent",
+    position: "relative" as const,
+    overflow: "hidden" as const,
   };
 
   return (
     <div ref={setNodeRef} style={style} {...attributes} onClick={onClick}>
-      <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
-        {/* 드래그 핸들 (listeners를 여기에만 적용하면 핸들 잡고만 이동 가능) */}
-        {!isLocked && (
-          <span {...listeners} style={{ cursor: "grab", fontSize: "1.2rem" }}>
-            ☰
+      {isLocked && (
+        <div
+          style={{
+            position: "absolute",
+            top: 0,
+            left: 0,
+            right: 0,
+            bottom: 0,
+            background:
+              "linear-gradient(45deg, transparent 45%, #ffffff05 50%, transparent 55%)",
+            backgroundSize: "10px 10px",
+            pointerEvents: "none",
+          }}
+        />
+      )}
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          gap: "10px",
+          zIndex: 1,
+        }}
+      >
+        {!isLocked ? (
+          <span
+            {...listeners}
+            style={{
+              cursor: "grab",
+              fontSize: "0.9rem",
+              opacity: 0.4,
+              color: "#fff",
+            }}
+          >
+            ⠿
           </span>
+        ) : (
+          <LockIcon />
         )}
-        <span style={{ fontWeight: isLocked ? "bold" : 500 }}>
-          {name} {isLocked && "🔒"}
+        <span
+          style={{
+            fontSize: "0.85rem",
+            fontWeight: isLocked ? 600 : 400,
+            letterSpacing: "0.02em",
+          }}
+        >
+          {name}
         </span>
       </div>
 
-      {/* ON/OFF 토글 (이벤트 전파 막기 중요) */}
-      {!isLocked && (
-        <input
-          type="checkbox"
-          checked={isEnabled}
-          onChange={() => {}} // 부모의 onToggle에서 처리
-          onClick={onToggle}
-          style={{ cursor: "pointer", width: "16px", height: "16px" }}
-        />
-      )}
+      <div style={{ display: "flex", alignItems: "center", gap: "8px", zIndex: 1 }}>
+        {isLocked ? (
+          <span
+            style={{
+              fontSize: "0.65rem",
+              backgroundColor: "#333",
+              padding: "2px 6px",
+              borderRadius: "4px",
+              color: "#aaa",
+              fontWeight: "bold",
+              textTransform: "uppercase",
+              letterSpacing: "0.05em",
+            }}
+          >
+            System
+          </span>
+        ) : (
+          <input
+            type="checkbox"
+            checked={isEnabled}
+            onChange={() => {}}
+            onClick={onToggle}
+            style={{
+              cursor: "pointer",
+              width: "14px",
+              height: "14px",
+              accentColor: "#3b82f6",
+            }}
+          />
+        )}
+      </div>
     </div>
   );
 }
