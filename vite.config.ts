@@ -49,6 +49,26 @@ const shaderLabPlugin = (): Plugin => ({
             res.end(JSON.stringify({ error: "Failed to create shader" }));
           }
         });
+      } else if (req.url === "/api/delete-shader" && req.method === "POST") {
+        let body = "";
+        req.on("data", (chunk) => {
+          body += chunk;
+        });
+        req.on("end", () => {
+          try {
+            const { filename } = JSON.parse(body);
+            const filePath = path.resolve(__dirname, "src/shaders/parts", filename);
+            if (fs.existsSync(filePath)) {
+              fs.unlinkSync(filePath);
+            }
+            res.statusCode = 200;
+            res.setHeader("Content-Type", "application/json");
+            res.end(JSON.stringify({ success: true }));
+          } catch (error) {
+            res.statusCode = 500;
+            res.end(JSON.stringify({ error: "Failed to delete shader" }));
+          }
+        });
       } else {
         next();
       }

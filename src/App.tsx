@@ -1,4 +1,4 @@
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect } from "react";
 import { Canvas } from "@react-three/fiber";
 import Editor from "react-simple-code-editor";
 import { highlight, languages } from "prismjs";
@@ -27,6 +27,8 @@ import borderFrag from "./shaders/parts/border.glsl";
 import dropShadowFrag from "./shaders/parts/drop-shadow.glsl";
 import innerShadowFrag from "./shaders/parts/inner-shadow.glsl";
 
+import { getAllCSSProperties } from "./utils/cssProperties";
+
 // 셰이더 블록 타입 정의
 interface ShaderBlock {
   id: string;
@@ -40,6 +42,14 @@ interface ShaderBlock {
 
 export default function App() {
   const [isSaving, setIsSaving] = useState(false);
+  const [showAddMenu, setShowAddMenu] = useState(false);
+  const [searchTerm, setSearchTerm] = useState("");
+  const [allProperties, setAllProperties] = useState<string[]>([]);
+
+  // 컴포넌트 마운트 시 브라우저 지원 모든 CSS 속성 가져오기
+  useEffect(() => {
+    setAllProperties(getAllCSSProperties());
+  }, []);
 
   // 초기 블록 데이터
   const [blocks, setBlocks] = useState<ShaderBlock[]>([
@@ -72,7 +82,7 @@ export default function App() {
     },
     {
       id: "drop-shadow",
-      name: "drop-shadow",
+      name: "box-shadow",
       enabled: true,
       type: "main",
       filename: "drop-shadow.glsl",
@@ -88,7 +98,7 @@ export default function App() {
     },
     {
       id: "inner-shadow",
-      name: "inner-shadow",
+      name: "box-shadow-inner",
       enabled: true,
       type: "main",
       filename: "inner-shadow.glsl",
@@ -189,15 +199,17 @@ export default function App() {
     setBlocks((prev) =>
       prev.map((b) => (b.id === activeId ? { ...b, code: newCode } : b)),
     );
-    // 자동 저장 (디바운싱 없이 즉시 실행 - 로컬 환경이므로)
     saveFile(activeBlock.filename, newCode);
   };
 
-  const handleAddEffect = async () => {
-    const name = prompt("Enter effect name (e.g. glass-effect):");
-    if (!name) return;
+  const handleAddEffect = async (propertyName: string) => {
+    // 이미 존재하는지 확인
+    if (blocks.some((b) => b.name === propertyName)) {
+      alert("This property is already in the pipeline.");
+      return;
+    }
 
-    const filename = `${name}.glsl`;
+    const filename = `${propertyName}.glsl`;
     
     try {
       const response = await fetch("/api/create-shader", {
@@ -208,22 +220,23 @@ export default function App() {
       
       if (response.ok) {
         const newBlock: ShaderBlock = {
-          id: name,
-          name: name,
+          id: propertyName,
+          name: propertyName,
           filename: filename,
           enabled: true,
           type: "main",
-          code: "// New effect\nlayer = vec4(1.0, 0.0, 0.0, 1.0);",
+          code: `// CSS: ${propertyName}\nlayer = vec4(0.5, 0.5, 0.5, 1.0); // Default placeholder`,
         };
         
-        // Finish 블록 바로 앞에 추가
         setBlocks((prev) => {
           const finishIndex = prev.findIndex((b) => b.id === "finish");
           const next = [...prev];
           next.splice(finishIndex, 0, newBlock);
           return next;
         });
-        setActiveId(name);
+        setActiveId(propertyName);
+        setShowAddMenu(false);
+        setSearchTerm("");
       }
     } catch (err) {
       alert("Failed to create effect file");
@@ -236,6 +249,43 @@ export default function App() {
       prev.map((b) => (b.id === id ? { ...b, enabled: !b.enabled } : b)),
     );
   };
+
+  const handleDelete = async (id: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    const block = blocks.find((b) => b.id === id);
+    if (!block || block.locked) return;
+
+    if (!confirm(`Are you sure you want to delete the "${block.name}" effect?`)) {
+      return;
+    }
+
+    try {
+      const response = await fetch("/api/delete-shader", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ filename: block.filename }),
+      });
+
+      if (response.ok) {
+        setBlocks((prev) => {
+          const next = prev.filter((b) => b.id !== id);
+          // 삭제된 블록이 활성화된 블록이었다면 다른 블록 선택
+          if (activeId === id) {
+            const deletedIndex = prev.findIndex((b) => b.id === id);
+            const fallbackIndex = Math.max(0, deletedIndex - 1);
+            setActiveId(next[fallbackIndex]?.id || "");
+          }
+          return next;
+        });
+      }
+    } catch (err) {
+      alert("Failed to delete effect file");
+    }
+  };
+
+  const filteredProperties = allProperties.filter((p) =>
+    p.toLowerCase().includes(searchTerm.toLowerCase())
+  );
 
   return (
     <div
@@ -266,7 +316,7 @@ export default function App() {
         >
           Pipeline Tasks
         </div>
-        <div style={{ flex: 1, overflow: "auto" }}>
+        <div style={{ flex: 1, overflow: "auto", position: "relative" }}>
           <DndContext
             collisionDetection={closestCenter}
             onDragEnd={handleDragEnd}
@@ -285,18 +335,85 @@ export default function App() {
                   isLocked={block.locked}
                   onClick={() => setActiveId(block.id)}
                   onToggle={(e) => toggleBlock(block.id, e)}
+                  onDelete={(e) => handleDelete(block.id, e)}
                 />
               ))}
             </SortableContext>
           </DndContext>
+
+          {/* Search/Add Menu */}
+          {showAddMenu && (
+            <div
+              style={{
+                position: "absolute",
+                bottom: "70px",
+                left: "10px",
+                right: "10px",
+                backgroundColor: "#252526",
+                border: "1px solid #3b82f6",
+                borderRadius: "6px",
+                zIndex: 100,
+                boxShadow: "0 4px 12px rgba(0,0,0,0.5)",
+                display: "flex",
+                flexDirection: "column",
+                maxHeight: "300px",
+              }}
+            >
+              <input
+                autoFocus
+                placeholder="Search CSS property..."
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+                style={{
+                  padding: "10px",
+                  backgroundColor: "#1e1e1e",
+                  border: "none",
+                  borderBottom: "1px solid #333",
+                  color: "white",
+                  outline: "none",
+                }}
+              />
+              <div style={{ overflowY: "auto" }}>
+                {filteredProperties.map((p) => (
+                  <div
+                    key={p}
+                    onClick={() => handleAddEffect(p)}
+                    style={{
+                      padding: "8px 12px",
+                      fontSize: "0.85rem",
+                      cursor: "pointer",
+                      borderBottom: "1px solid #333",
+                      backgroundColor: blocks.some((b) => b.name === p)
+                        ? "#1a1a1a"
+                        : "transparent",
+                      color: blocks.some((b) => b.name === p) ? "#555" : "#ddd",
+                    }}
+                    onMouseEnter={(e) =>
+                      (e.currentTarget.style.backgroundColor = "#2d2d2d")
+                    }
+                    onMouseLeave={(e) =>
+                      (e.currentTarget.style.backgroundColor = blocks.some(
+                        (b) => b.name === p
+                      )
+                        ? "#1a1a1a"
+                        : "transparent")
+                    }
+                  >
+                    {p} {blocks.some((b) => b.name === p) && "(Added)"}
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
         </div>
+
         {/* 새 블록 추가 버튼 */}
         <button
-          onClick={handleAddEffect}
+          onClick={() => setShowAddMenu(!showAddMenu)}
           style={{
             margin: "15px",
             padding: "10px",
-            background: "#3b82f6",
+            background: showAddMenu ? "#ef4444" : "#3b82f6",
             border: "none",
             borderRadius: "6px",
             color: "white",
@@ -308,7 +425,8 @@ export default function App() {
             gap: "8px",
           }}
         >
-          <span>+</span> Add Effect
+          <span>{showAddMenu ? "✕" : "+"}</span>{" "}
+          {showAddMenu ? "Cancel" : "Add Effect"}
         </button>
       </div>
 
