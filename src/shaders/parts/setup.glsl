@@ -1,7 +1,13 @@
-  vec2 p = (vUv - 0.5) * uSize;
-  vec2 halfSize = uSize * 0.5;
-  
-  float d = 0.0;           // SDF 거리값
-  vec3 finalColor = uColor; // 최종 색상
-  float finalAlpha = 1.0;  // 최종 투명도
-  float fillAlpha = 0.0;   // 내부 채움 알파
+    // 1. 컨텍스트 생성 (비싼 SDF 계산은 여기서 딱 1번만!)
+    MirageContext ctx;
+    ctx.size = uSize;
+    ctx.p = (vUv - 0.5) * uSize;
+    ctx.antiAlias = 1.0;
+    
+    // 기본 SDF 계산
+    vec2 halfSize = ctx.size * 0.5;
+    ctx.d = sdRoundedBox(ctx.p, halfSize, uRadius);
+
+    // 2. 도화지 준비 (투명)
+    vec4 finalColor = vec4(0.0);
+    vec4 layer = vec4(0.0); // 각 블록이 사용할 임시 변수

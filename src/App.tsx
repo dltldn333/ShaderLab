@@ -22,6 +22,10 @@ import headerFrag from "./shaders/parts/01_header.frag";
 import utilsFrag from "./shaders/parts/02_utils.frag";
 import setupFrag from "./shaders/parts/setup.glsl";
 import finishFrag from "./shaders/parts/finish.glsl";
+import backgroundColorFrag from "./shaders/parts/background-color.glsl";
+import borderFrag from "./shaders/parts/border.glsl";
+import dropShadowFrag from "./shaders/parts/drop-shadow.glsl";
+import innerShadowFrag from "./shaders/parts/inner-shadow.glsl";
 
 // 셰이더 블록 타입 정의
 interface ShaderBlock {
@@ -29,81 +33,153 @@ interface ShaderBlock {
   name: string;
   code: string;
   enabled: boolean;
+  locked?: boolean;
+  type?: "global" | "main";
+  filename: string;
 }
 
 export default function App() {
-  // 초기 블록 데이터 (여기가 핵심!)
+  const [isSaving, setIsSaving] = useState(false);
+
+  // 초기 블록 데이터
   const [blocks, setBlocks] = useState<ShaderBlock[]>([
     {
-      id: "shape",
-      name: "1. Base Shape (SDF)",
+      id: "header",
+      name: "Header",
       enabled: true,
-      code: `  // 1. 박스 형태 정의
-  d = sdRoundedBox(p, halfSize, uRadius);`,
+      locked: true,
+      type: "global",
+      filename: "01_header.frag",
+      code: headerFrag,
     },
     {
-      id: "fill",
-      name: "2. Fill Logic",
+      id: "utils",
+      name: "Utils",
       enabled: true,
-      code: `  // 2. 내부 채우기 계산
-  float smoothEdge = 1.0;
-  fillAlpha = 1.0 - smoothstep(-uBorderWidth - smoothEdge, -uBorderWidth, d);`,
+      locked: true,
+      type: "global",
+      filename: "02_utils.frag",
+      code: utilsFrag,
+    },
+    {
+      id: "setup",
+      name: "Setup",
+      enabled: true,
+      locked: true,
+      type: "main",
+      filename: "setup.glsl",
+      code: setupFrag,
+    },
+    {
+      id: "drop-shadow",
+      name: "drop-shadow",
+      enabled: true,
+      type: "main",
+      filename: "drop-shadow.glsl",
+      code: dropShadowFrag,
+    },
+    {
+      id: "background-color",
+      name: "background-color",
+      enabled: true,
+      type: "main",
+      filename: "background-color.glsl",
+      code: backgroundColorFrag,
+    },
+    {
+      id: "inner-shadow",
+      name: "inner-shadow",
+      enabled: true,
+      type: "main",
+      filename: "inner-shadow.glsl",
+      code: innerShadowFrag,
     },
     {
       id: "border",
-      name: "3. Border Logic",
+      name: "border",
       enabled: true,
-      code: `  // 3. 테두리 계산 및 색상 합성
-  float borderAlpha = 0.0;
-  if (uBorderWidth > 0.01) {
-    borderAlpha = (1.0 - smoothstep(0.0, 1.0, d)) - fillAlpha;
-  }
-  
-  float totalAlpha = borderAlpha + fillAlpha;
-  if (totalAlpha > 0.001) {
-     finalColor = mix(uColor, uBorderColor, borderAlpha / totalAlpha);
-  }
-  
-  // 배경 투명도 적용
-  finalAlpha = borderAlpha + (fillAlpha * uBgOpacity);`,
+      type: "main",
+      filename: "border.glsl",
+      code: borderFrag,
+    },
+    {
+      id: "finish",
+      name: "Finish",
+      enabled: true,
+      locked: true,
+      type: "main",
+      filename: "finish.glsl",
+      code: finishFrag,
     },
   ]);
 
-  const [activeId, setActiveId] = useState<string>("shape");
+  const [activeId, setActiveId] = useState<string>("background-color");
 
   // 현재 편집 중인 블록 찾기
   const activeBlock = blocks.find((b) => b.id === activeId) || blocks[0];
 
+  // 로컬 파일 저장 함수
+  const saveFile = async (filename: string, code: string) => {
+    setIsSaving(true);
+    try {
+      const response = await fetch("/api/save-shader", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ filename, code }),
+      });
+      if (!response.ok) throw new Error("Failed to save");
+    } catch (err) {
+      console.error("Save error:", err);
+    } finally {
+      setTimeout(() => setIsSaving(false), 500);
+    }
+  };
+
   // 🔄 셰이더 조립 (Assembler)
   const fullFragmentCode = useMemo(() => {
-    // 1. Header & Utils (Global Scope)
-    let code = headerFrag + "\n" + utilsFrag + "\n";
+    let code = "";
+
+    // 1. Global Blocks (Header, Utils)
+    blocks
+      .filter((b) => b.enabled && b.type === "global")
+      .forEach((b) => {
+        code += `// --- [Global: ${b.name}] ---\n${b.code}\n\n`;
+      });
 
     // 2. Main Start
     code += "void main() {\n";
-    code += setupFrag + "\n\n"; // 변수 초기화 (d, finalColor 등)
 
-    // 3. Enabled Blocks (Tasks)
-    blocks.forEach((block) => {
-      if (block.enabled) {
-        code += `  // --- [Block: ${block.name}] ---\n`;
-        code += block.code + "\n\n";
-      }
-    });
-
-    // 4. Main End
-    code += finishFrag;
+    // 3. Main Blocks (Setup, Layers, Finish)
+    blocks
+      .filter((b) => b.enabled && b.type === "main")
+      .forEach((block) => {
+        if (block.locked) {
+          code += `  // --- [Fixed: ${block.name}] ---\n`;
+          code += block.code + "\n\n";
+        } else {
+          code += `  // --- [Layer: ${block.name}] ---\n`;
+          code += `  {\n${block.code}\n  }\n`;
+          code += `  finalColor = blend(finalColor, layer);\n\n`;
+        }
+      });
 
     return code;
-  }, [blocks]); // 블록 순서나 내용이 바뀌면 재조립
+  }, [blocks]);
 
   // 이벤트 핸들러들
   const handleDragEnd = (event: DragEndEvent) => {
     const { active, over } = event;
-    if (active.id !== over?.id) {
+    if (!over) return;
+
+    if (active.id !== over.id) {
       setBlocks((items) => {
         const oldIndex = items.findIndex((i) => i.id === active.id);
-        const newIndex = items.findIndex((i) => i.id === over?.id);
+        const newIndex = items.findIndex((i) => i.id === over.id);
+
+        if (items[oldIndex].locked || items[newIndex].locked) {
+          return items;
+        }
+
         return arrayMove(items, oldIndex, newIndex);
       });
     }
@@ -113,10 +189,49 @@ export default function App() {
     setBlocks((prev) =>
       prev.map((b) => (b.id === activeId ? { ...b, code: newCode } : b)),
     );
+    // 자동 저장 (디바운싱 없이 즉시 실행 - 로컬 환경이므로)
+    saveFile(activeBlock.filename, newCode);
+  };
+
+  const handleAddEffect = async () => {
+    const name = prompt("Enter effect name (e.g. glass-effect):");
+    if (!name) return;
+
+    const filename = `${name}.glsl`;
+    
+    try {
+      const response = await fetch("/api/create-shader", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ filename }),
+      });
+      
+      if (response.ok) {
+        const newBlock: ShaderBlock = {
+          id: name,
+          name: name,
+          filename: filename,
+          enabled: true,
+          type: "main",
+          code: "// New effect\nlayer = vec4(1.0, 0.0, 0.0, 1.0);",
+        };
+        
+        // Finish 블록 바로 앞에 추가
+        setBlocks((prev) => {
+          const finishIndex = prev.findIndex((b) => b.id === "finish");
+          const next = [...prev];
+          next.splice(finishIndex, 0, newBlock);
+          return next;
+        });
+        setActiveId(name);
+      }
+    } catch (err) {
+      alert("Failed to create effect file");
+    }
   };
 
   const toggleBlock = (id: string, e: React.MouseEvent) => {
-    e.stopPropagation(); // 클릭 이벤트 버블링 방지
+    e.stopPropagation();
     setBlocks((prev) =>
       prev.map((b) => (b.id === id ? { ...b, enabled: !b.enabled } : b)),
     );
@@ -167,6 +282,7 @@ export default function App() {
                   name={block.name}
                   isActive={block.id === activeId}
                   isEnabled={block.enabled}
+                  isLocked={block.locked}
                   onClick={() => setActiveId(block.id)}
                   onToggle={(e) => toggleBlock(block.id, e)}
                 />
@@ -174,17 +290,25 @@ export default function App() {
             </SortableContext>
           </DndContext>
         </div>
-        {/* 새 블록 추가 버튼 (추후 구현) */}
+        {/* 새 블록 추가 버튼 */}
         <button
+          onClick={handleAddEffect}
           style={{
+            margin: "15px",
             padding: "10px",
             background: "#3b82f6",
             border: "none",
+            borderRadius: "6px",
             color: "white",
             cursor: "pointer",
+            fontWeight: "bold",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            gap: "8px",
           }}
         >
-          + Add Effect
+          <span>+</span> Add Effect
         </button>
       </div>
 
@@ -199,16 +323,29 @@ export default function App() {
       >
         <div
           style={{
-            padding: "10px",
+            padding: "10px 20px",
             backgroundColor: "#252526",
             fontSize: "0.8rem",
             color: "#888",
+            display: "flex",
+            justifyContent: "space-between",
+            alignItems: "center",
           }}
         >
-          EDITING:{" "}
-          <span style={{ color: "#fff", fontWeight: "bold" }}>
-            {activeBlock.name}
-          </span>
+          <div>
+            EDITING:{" "}
+            <span style={{ color: "#fff", fontWeight: "bold" }}>
+              {activeBlock.name}
+            </span>
+            <span style={{ marginLeft: "10px", opacity: 0.5 }}>
+              ({activeBlock.filename})
+            </span>
+          </div>
+          {isSaving && (
+            <div style={{ color: "#3b82f6", fontWeight: "bold" }}>
+              ● SAVING...
+            </div>
+          )}
         </div>
         <div style={{ flex: 1, overflow: "auto", backgroundColor: "#1e1e1e" }}>
           <Editor
