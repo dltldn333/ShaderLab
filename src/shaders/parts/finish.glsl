@@ -1,4 +1,6 @@
-  float resultAlpha = finalAlpha * uOpacity;
-  if (resultAlpha < 0.001) discard;
-  gl_FragColor = vec4(finalColor, resultAlpha);
+    // --- [Post-Process: opacity] ---
+    finalColor.a *= uOpacity;
+    
+    if (finalColor.a < 0.001) discard;
+    gl_FragColor = finalColor;
 }

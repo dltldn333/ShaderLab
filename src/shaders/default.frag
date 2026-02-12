@@ -1,10 +1,3 @@
-# base shader (Modular Architecture)
-
-This project uses a "Context & Layer" pattern for shaders.
-
-## 1. Common Definition (Header & Utils)
-
-```glsl
 precision mediump float;
 varying vec2 vUv;
 
@@ -34,57 +27,44 @@ vec4 blend(vec4 backdrop, vec4 source) {
     vec3 outColor = (source.rgb * source.a + backdrop.rgb * backdrop.a * (1.0 - source.a)) / outAlpha;
     return vec4(outColor, outAlpha);
 }
-```
 
-## 2. Setup (Pre-Process)
-
-```glsl
 void main() {
+    // 1. 컨텍스트 생성
     MirageContext ctx;
     ctx.size = uSize;
     ctx.p = (vUv - 0.5) * uSize;
     ctx.antiAlias = 1.0;
     
+    // 기본 SDF 계산
     vec2 halfSize = ctx.size * 0.5;
     ctx.d = sdRoundedBox(ctx.p, halfSize, uRadius);
 
+    // 2. 도화지 준비
     vec4 finalColor = vec4(0.0);
     vec4 layer = vec4(0.0);
-```
 
-## 3. Layers (Movable Blocks)
-
-Each block is wrapped in `{ ... }` and followed by `finalColor = blend(finalColor, layer);`.
-
-### background-color
-```glsl
-{
-    float fillAlpha = 1.0 - smoothstep(-ctx.antiAlias, 0.0, ctx.d);
-    layer = vec4(uColor, fillAlpha * uBgOpacity);
-}
-finalColor = blend(finalColor, layer);
-```
-
-### border
-```glsl
-{
-    if (uBorderWidth > 0.0) {
-        float inside = smoothstep(-uBorderWidth - ctx.antiAlias, -uBorderWidth, ctx.d);
-        float outside = smoothstep(0.0, ctx.antiAlias, ctx.d);
-        float borderMask = 1.0 - inside - outside;
-        layer = vec4(uBorderColor, borderMask);
-    } else {
-        layer = vec4(0.0);
+    // --- [Block: background-color] ---
+    {
+        float fillAlpha = 1.0 - smoothstep(-ctx.antiAlias, 0.0, ctx.d);
+        layer = vec4(uColor, fillAlpha * uBgOpacity);
     }
-}
-finalColor = blend(finalColor, layer);
-```
+    finalColor = blend(finalColor, layer);
 
-## 4. Finish (Post-Process)
+    // --- [Block: border] ---
+    {
+        if (uBorderWidth > 0.0) {
+            float inside = smoothstep(-uBorderWidth - ctx.antiAlias, -uBorderWidth, ctx.d);
+            float outside = smoothstep(0.0, ctx.antiAlias, ctx.d);
+            float borderMask = 1.0 - inside - outside;
+            layer = vec4(uBorderColor, borderMask);
+        } else {
+            layer = vec4(0.0);
+        }
+    }
+    finalColor = blend(finalColor, layer);
 
-```glsl
+    // --- [Post-Process: opacity] ---
     finalColor.a *= uOpacity;
     if (finalColor.a < 0.001) discard;
     gl_FragColor = finalColor;
 }
-```

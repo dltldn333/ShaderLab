@@ -22,6 +22,10 @@ import headerFrag from "./shaders/parts/01_header.frag";
 import utilsFrag from "./shaders/parts/02_utils.frag";
 import setupFrag from "./shaders/parts/setup.glsl";
 import finishFrag from "./shaders/parts/finish.glsl";
+import backgroundColorFrag from "./shaders/parts/background-color.glsl";
+import borderFrag from "./shaders/parts/border.glsl";
+import dropShadowFrag from "./shaders/parts/drop-shadow.glsl";
+import innerShadowFrag from "./shaders/parts/inner-shadow.glsl";
 
 // 셰이더 블록 타입 정의
 interface ShaderBlock {
@@ -29,70 +33,108 @@ interface ShaderBlock {
   name: string;
   code: string;
   enabled: boolean;
+  locked?: boolean;
+  type?: "global" | "main";
 }
 
 export default function App() {
   // 초기 블록 데이터 (여기가 핵심!)
   const [blocks, setBlocks] = useState<ShaderBlock[]>([
     {
-      id: "shape",
-      name: "1. Base Shape (SDF)",
+      id: "header",
+      name: "Header",
       enabled: true,
-      code: `  // 1. 박스 형태 정의
-  d = sdRoundedBox(p, halfSize, uRadius);`,
+      locked: true,
+      type: "global",
+      code: headerFrag,
     },
     {
-      id: "fill",
-      name: "2. Fill Logic",
+      id: "utils",
+      name: "Utils",
       enabled: true,
-      code: `  // 2. 내부 채우기 계산
-  float smoothEdge = 1.0;
-  fillAlpha = 1.0 - smoothstep(-uBorderWidth - smoothEdge, -uBorderWidth, d);`,
+      locked: true,
+      type: "global",
+      code: utilsFrag,
+    },
+    {
+      id: "setup",
+      name: "Setup",
+      enabled: true,
+      locked: true,
+      type: "main",
+      code: setupFrag,
+    },
+    {
+      id: "drop-shadow",
+      name: "drop-shadow",
+      enabled: true,
+      type: "main",
+      code: dropShadowFrag,
+    },
+    {
+      id: "background-color",
+      name: "background-color",
+      enabled: true,
+      type: "main",
+      code: backgroundColorFrag,
+    },
+    {
+      id: "inner-shadow",
+      name: "inner-shadow",
+      enabled: true,
+      type: "main",
+      code: innerShadowFrag,
     },
     {
       id: "border",
-      name: "3. Border Logic",
+      name: "border",
       enabled: true,
-      code: `  // 3. 테두리 계산 및 색상 합성
-  float borderAlpha = 0.0;
-  if (uBorderWidth > 0.01) {
-    borderAlpha = (1.0 - smoothstep(0.0, 1.0, d)) - fillAlpha;
-  }
-  
-  float totalAlpha = borderAlpha + fillAlpha;
-  if (totalAlpha > 0.001) {
-     finalColor = mix(uColor, uBorderColor, borderAlpha / totalAlpha);
-  }
-  
-  // 배경 투명도 적용
-  finalAlpha = borderAlpha + (fillAlpha * uBgOpacity);`,
+      type: "main",
+      code: borderFrag,
+    },
+    {
+      id: "finish",
+      name: "Finish",
+      enabled: true,
+      locked: true,
+      type: "main",
+      code: finishFrag,
     },
   ]);
 
-  const [activeId, setActiveId] = useState<string>("shape");
+  const [activeId, setActiveId] = useState<string>("background-color");
 
   // 현재 편집 중인 블록 찾기
   const activeBlock = blocks.find((b) => b.id === activeId) || blocks[0];
 
-  // 🔄 셰이더 조립 (Assembler)
+  //  셰이더 조립 (Assembler)
   const fullFragmentCode = useMemo(() => {
-    // 1. Header & Utils (Global Scope)
-    let code = headerFrag + "\n" + utilsFrag + "\n";
+    let code = "";
+
+    // 1. Global Blocks (Header, Utils)
+    blocks
+      .filter((b) => b.enabled && b.type === "global")
+      .forEach((b) => {
+        code += `// --- [Global: ${b.name}] ---\n${b.code}\n\n`;
+      });
 
     // 2. Main Start
     code += "void main() {\n";
-    code += setupFrag + "\n\n"; // 변수 초기화 (d, finalColor 등)
 
-    // 3. Enabled Blocks (Tasks)
-    blocks.forEach((block) => {
-      if (block.enabled) {
-        code += `  // --- [Block: ${block.name}] ---\n`;
-        code += block.code + "\n\n";
-      }
-    });
-
-    // 4. Main End
-    code += finishFrag;
+    // 3. Main Blocks (Setup, Layers, Finish)
+    blocks
+      .filter((b) => b.enabled && b.type === "main")
+      .forEach((block) => {
+        if (block.locked) {
+          // Setup과 Finish는 래핑하지 않고 그대로 넣음
+          code += `  // --- [Fixed: ${block.name}] ---\n`;
+          code += block.code + "\n\n";
+        } else {
+          code += `  // --- [Layer: ${block.name}] ---\n`;
+          code += `  {\n${block.code}\n  }\n`;
+          code += `  finalColor = blend(finalColor, layer);\n\n`;
+        }
+      });
 
     return code;
   }, [blocks]); // 블록 순서나 내용이 바뀌면 재조립
@@ -100,10 +142,18 @@ export default function App() {
   // 이벤트 핸들러들
   const handleDragEnd = (event: DragEndEvent) => {
     const { active, over } = event;
-    if (active.id !== over?.id) {
+    if (!over) return;
+
+    if (active.id !== over.id) {
       setBlocks((items) => {
         const oldIndex = items.findIndex((i) => i.id === active.id);
-        const newIndex = items.findIndex((i) => i.id === over?.id);
+        const newIndex = items.findIndex((i) => i.id === over.id);
+
+        // Locked 블록의 위치를 침범하지 못하도록 방지
+        if (items[oldIndex].locked || items[newIndex].locked) {
+          return items;
+        }
+
         return arrayMove(items, oldIndex, newIndex);
       });
     }
@@ -167,6 +217,7 @@ export default function App() {
                   name={block.name}
                   isActive={block.id === activeId}
                   isEnabled={block.enabled}
+                  isLocked={block.locked}
                   onClick={() => setActiveId(block.id)}
                   onToggle={(e) => toggleBlock(block.id, e)}
                 />
