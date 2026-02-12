@@ -2,7 +2,7 @@
 
 A shader lab for mirage-engine.
 
-![alt text](preview.png)
+![alt text](public/preview.png)
 
 ## Quick Start
 
