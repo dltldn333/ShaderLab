@@ -27,18 +27,8 @@ import borderFrag from "./shaders/parts/border.glsl";
 import dropShadowFrag from "./shaders/parts/drop-shadow.glsl";
 import innerShadowFrag from "./shaders/parts/inner-shadow.glsl";
 
-import { getAllCSSProperties } from "./utils/cssProperties";
-
-// 셰이더 블록 타입 정의
-interface ShaderBlock {
-  id: string;
-  name: string;
-  code: string;
-  enabled: boolean;
-  locked?: boolean;
-  type?: "global" | "main";
-  filename: string;
-}
+import { getAllCSSProperties, CSS_PROPERTY_METADATA } from "./utils/cssProperties";
+import type { ShaderBlock } from "./types/shader";
 
 export default function App() {
   const [isSaving, setIsSaving] = useState(false);
@@ -81,34 +71,20 @@ export default function App() {
       code: setupFrag,
     },
     {
-      id: "drop-shadow",
-      name: "box-shadow",
-      enabled: true,
-      type: "main",
-      filename: "drop-shadow.glsl",
-      code: dropShadowFrag,
-    },
-    {
       id: "background-color",
       name: "background-color",
       enabled: true,
       type: "main",
+      propertyName: "background-color",
       filename: "background-color.glsl",
       code: backgroundColorFrag,
-    },
-    {
-      id: "inner-shadow",
-      name: "box-shadow-inner",
-      enabled: true,
-      type: "main",
-      filename: "inner-shadow.glsl",
-      code: innerShadowFrag,
     },
     {
       id: "border",
       name: "border",
       enabled: true,
       type: "main",
+      propertyName: "border",
       filename: "border.glsl",
       code: borderFrag,
     },
@@ -127,6 +103,26 @@ export default function App() {
 
   // 현재 편집 중인 블록 찾기
   const activeBlock = blocks.find((b) => b.id === activeId) || blocks[0];
+
+  // 🔄 동적 헤더 생성 (블록들에 필요한 유니폼 자동 선언)
+  const dynamicHeader = useMemo(() => {
+    let uniformsCode = "// --- Dynamic Uniforms ---\n";
+    const seenUniforms = new Set<string>();
+
+    blocks.forEach((block) => {
+      if (!block.enabled || !block.propertyName) return;
+      const meta = CSS_PROPERTY_METADATA[block.propertyName];
+      if (!meta) return;
+
+      meta.uniforms.forEach((u) => {
+        if (seenUniforms.has(u.name)) return;
+        seenUniforms.add(u.name);
+        const glslType = u.type === "color" ? "vec3" : u.type;
+        uniformsCode += `uniform ${glslType} ${u.name};\n`;
+      });
+    });
+    return uniformsCode + "\n";
+  }, [blocks]);
 
   // 로컬 파일 저장 함수
   const saveFile = async (filename: string, code: string) => {
@@ -153,7 +149,11 @@ export default function App() {
     blocks
       .filter((b) => b.enabled && b.type === "global")
       .forEach((b) => {
-        code += `// --- [Global: ${b.name}] ---\n${b.code}\n\n`;
+        if (b.id === "header") {
+          code += `// --- [Global: ${b.name}] ---\n${dynamicHeader}${b.code}\n\n`;
+        } else {
+          code += `// --- [Global: ${b.name}] ---\n${b.code}\n\n`;
+        }
       });
 
     // 2. Main Start
@@ -174,9 +174,59 @@ export default function App() {
       });
 
     return code;
-  }, [blocks]);
+  }, [blocks, dynamicHeader]);
 
-  // 이벤트 핸들러들
+  // handleAddEffect 수정
+  const handleAddEffect = async (propertyName: string) => {
+    if (blocks.some((b) => b.propertyName === propertyName)) {
+      alert("This property is already in the pipeline.");
+      return;
+    }
+
+    const filename = `${propertyName}.glsl`;
+    const meta = CSS_PROPERTY_METADATA[propertyName];
+    
+    // 유니폼을 사용하는 기본 코드 생성
+    let initialCode = `// CSS: ${propertyName}\n`;
+    if (meta) {
+      initialCode += `layer = vec4(${meta.uniforms[0].name}, 1.0); // Use dynamic uniform`;
+    } else {
+      initialCode += `layer = vec4(0.5, 0.5, 0.5, 1.0);`;
+    }
+    
+    try {
+      const response = await fetch("/api/create-shader", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ filename, code: initialCode }),
+      });
+      
+      if (response.ok) {
+        const newBlock: ShaderBlock = {
+          id: propertyName + "-" + Date.now(),
+          name: propertyName,
+          propertyName: propertyName,
+          filename: filename,
+          enabled: true,
+          type: "main",
+          code: initialCode,
+        };
+        
+        setBlocks((prev) => {
+          const finishIndex = prev.findIndex((b) => b.id === "finish");
+          const next = [...prev];
+          next.splice(finishIndex, 0, newBlock);
+          return next;
+        });
+        setActiveId(newBlock.id);
+        setShowAddMenu(false);
+        setSearchTerm("");
+      }
+    } catch (err) {
+      alert("Failed to create effect file");
+    }
+  };
+
   const handleDragEnd = (event: DragEndEvent) => {
     const { active, over } = event;
     if (!over) return;
@@ -200,47 +250,6 @@ export default function App() {
       prev.map((b) => (b.id === activeId ? { ...b, code: newCode } : b)),
     );
     saveFile(activeBlock.filename, newCode);
-  };
-
-  const handleAddEffect = async (propertyName: string) => {
-    // 이미 존재하는지 확인
-    if (blocks.some((b) => b.name === propertyName)) {
-      alert("This property is already in the pipeline.");
-      return;
-    }
-
-    const filename = `${propertyName}.glsl`;
-    
-    try {
-      const response = await fetch("/api/create-shader", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ filename }),
-      });
-      
-      if (response.ok) {
-        const newBlock: ShaderBlock = {
-          id: propertyName,
-          name: propertyName,
-          filename: filename,
-          enabled: true,
-          type: "main",
-          code: `// CSS: ${propertyName}\nlayer = vec4(0.5, 0.5, 0.5, 1.0); // Default placeholder`,
-        };
-        
-        setBlocks((prev) => {
-          const finishIndex = prev.findIndex((b) => b.id === "finish");
-          const next = [...prev];
-          next.splice(finishIndex, 0, newBlock);
-          return next;
-        });
-        setActiveId(propertyName);
-        setShowAddMenu(false);
-        setSearchTerm("");
-      }
-    } catch (err) {
-      alert("Failed to create effect file");
-    }
   };
 
   const toggleBlock = (id: string, e: React.MouseEvent) => {
@@ -269,7 +278,6 @@ export default function App() {
       if (response.ok) {
         setBlocks((prev) => {
           const next = prev.filter((b) => b.id !== id);
-          // 삭제된 블록이 활성화된 블록이었다면 다른 블록 선택
           if (activeId === id) {
             const deletedIndex = prev.findIndex((b) => b.id === id);
             const fallbackIndex = Math.max(0, deletedIndex - 1);
@@ -383,23 +391,23 @@ export default function App() {
                       fontSize: "0.85rem",
                       cursor: "pointer",
                       borderBottom: "1px solid #333",
-                      backgroundColor: blocks.some((b) => b.name === p)
+                      backgroundColor: blocks.some((b) => b.propertyName === p)
                         ? "#1a1a1a"
                         : "transparent",
-                      color: blocks.some((b) => b.name === p) ? "#555" : "#ddd",
+                      color: blocks.some((b) => b.propertyName === p) ? "#555" : "#ddd",
                     }}
                     onMouseEnter={(e) =>
                       (e.currentTarget.style.backgroundColor = "#2d2d2d")
                     }
                     onMouseLeave={(e) =>
                       (e.currentTarget.style.backgroundColor = blocks.some(
-                        (b) => b.name === p
+                        (b) => b.propertyName === p
                       )
                         ? "#1a1a1a"
                         : "transparent")
                     }
                   >
-                    {p} {blocks.some((b) => b.name === p) && "(Added)"}
+                    {p} {blocks.some((b) => b.propertyName === p) && "(Added)"}
                   </div>
                 ))}
               </div>
@@ -485,7 +493,11 @@ export default function App() {
         <Canvas orthographic camera={{ zoom: 1, position: [0, 0, 10] }}>
           <color attach="background" args={["#111"]} />
           <group scale={[1, 1, 1]}>
-            <Preview vertexCode={boxVertex} fragmentCode={fullFragmentCode} />
+            <Preview 
+              vertexCode={boxVertex} 
+              fragmentCode={fullFragmentCode} 
+              blocks={blocks}
+            />
           </group>
         </Canvas>
       </div>
